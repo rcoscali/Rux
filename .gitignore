@@ -83,6 +83,10 @@ test/disk.img
 # mrsh build artifacts (only track build script + source tarball)
 userspace/mrsh/mrsh/
 userspace/mrsh/editline-build/
+userspace/mrsh/mrsh-x86_64/
+userspace/mrsh/editline-build-x86_64/
+userspace/toybox/toybox-x86_64-build/
+toolchain/musl-1.2.5-x86_64/
 userspace/mrsh/include/
 
 # SPIN model checking generated files

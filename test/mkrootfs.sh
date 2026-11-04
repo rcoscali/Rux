@@ -13,6 +13,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 cd "$PROJECT_ROOT"
+PLATFORM="$(bash "$PROJECT_ROOT/build/current-platform.sh")"
+case "$PLATFORM" in
+    riscv64|x86_64) ;;
+    *) echo "Minimal rootfs is not supported for PLATFORM=$PLATFORM" >&2; exit 1 ;;
+esac
 
 # Configuration
 IMAGE_FILE="$PROJECT_ROOT/test/rootfs.img"
@@ -27,6 +32,18 @@ trap 'rm -rf "$STAGING"' EXIT
 MRSH_BINARY="$PROJECT_ROOT/userspace/mrsh/mrsh/mrsh"
 USERSPACE_TARGET="$PROJECT_ROOT/userspace/target/riscv64gc-unknown-linux-musl/release"
 TOYBOX_BINARY="$PROJECT_ROOT/userspace/toybox/toybox/toybox"
+if [ "$PLATFORM" = "x86_64" ]; then
+    IMAGE_FILE="$HOME/rux-images/minimal/rootfs-x86_64.img"
+    mkdir -p "$(dirname "$IMAGE_FILE")"
+    MRSH_BINARY="$PROJECT_ROOT/userspace/mrsh/mrsh-x86_64/mrsh"
+    TOYBOX_BINARY="$PROJECT_ROOT/userspace/toybox/toybox-x86_64-build/toybox"
+    for binary in "$MRSH_BINARY" "$TOYBOX_BINARY"; do
+        if ! readelf -h "$binary" | grep -q 'Machine:.*Advanced Micro Devices X86-64'; then
+            echo "Missing or non-x86_64 binary: $binary" >&2
+            exit 1
+        fi
+    done
+fi
 
 # GUI applications
 DESKTOP_BINARY="$USERSPACE_TARGET/desktop"
@@ -43,13 +60,17 @@ echo "Preparing staging tree: $STAGING"
 mkdir -p "$STAGING/bin" "$STAGING/app" "$STAGING/test" "$STAGING/dev" \
          "$STAGING/etc" "$STAGING/lib" "$STAGING/proc" "$STAGING/tmp" \
          "$STAGING/var/log" "$STAGING/sbin"
+if [ "$PLATFORM" = "x86_64" ]; then
+    mkdir -p "$STAGING/root" "$STAGING/home" "$STAGING/sys" "$STAGING/run"
+    chmod 1777 "$STAGING/tmp"
+fi
 
 # Install dynamic linker (ld-musl)
-MUSL_LIB_DIR="$PROJECT_ROOT/toolchain/riscv64-rux-linux-musl/lib"
+MUSL_LIB_DIR="$PROJECT_ROOT/toolchain/${PLATFORM}-rux-linux-musl/lib"
 if [ -f "$MUSL_LIB_DIR/libc.so" ]; then
-    echo "Installing dynamic linker to /lib/ld-musl-riscv64.so.1..."
-    cp "$MUSL_LIB_DIR/libc.so" "$STAGING/lib/ld-musl-riscv64.so.1"
-    chmod +x "$STAGING/lib/ld-musl-riscv64.so.1"
+    echo "Installing dynamic linker to /lib/ld-musl-${PLATFORM}.so.1..."
+    cp "$MUSL_LIB_DIR/libc.so" "$STAGING/lib/ld-musl-${PLATFORM}.so.1"
+    chmod +x "$STAGING/lib/ld-musl-${PLATFORM}.so.1"
 else
     echo "Warning: musl libc.so not found at $MUSL_LIB_DIR/libc.so"
 fi
@@ -81,6 +102,7 @@ nogroup:x:65534:
 nobody:x:65534:
 GROUP
 
+if [ "$PLATFORM" = "riscv64" ]; then
 # Copy GUI applications to /app/ directory
 for app in desktop calculator clock vshell; do
     eval "binary=\$$(echo $app | tr '[:lower:]' '[:upper:]')_BINARY"
@@ -419,6 +441,8 @@ if [ -f "$LTPSCAN_SRC" ] && [ -d "$MUSL_LIB_DIR/../include" ]; then
     fi
 fi
 
+fi
+
 # Install mrsh as /bin/sh (POSIX-compliant shell)
 if [ -f "$MRSH_BINARY" ]; then
     echo "Installing mrsh to /bin/sh..."
@@ -506,6 +530,9 @@ mkfs.ext4 -q -F -O ^metadata_csum,^flex_bg -d "$STAGING" "$IMAGE_FILE" "$IMAGE_S
 SWAP_SIZE_MB=256
 TOTAL_SIZE_MB=$((1024 + SWAP_SIZE_MB))
 truncate -s "${TOTAL_SIZE_MB}M" "$IMAGE_FILE"
+if [ "$PLATFORM" = "x86_64" ]; then
+    ln -sfn "$IMAGE_FILE" "$PROJECT_ROOT/test/rootfs-x86_64.img"
+fi
 echo "Appended ${SWAP_SIZE_MB}MB swap tail (image now ${TOTAL_SIZE_MB}MB, fs still ${IMAGE_SIZE})"
 
 # Display image contents summary
@@ -521,6 +548,10 @@ ls -lh "$IMAGE_FILE"
 echo ""
 echo "Directory structure:"
 echo "  /bin/          - mrsh (as sh), toybox, basic commands"
+if [ "$PLATFORM" = "x86_64" ]; then
+    echo "  Minimal x86_64 rootfs; RISC-V applications and tests are excluded."
+    exit 0
+fi
 echo "  /app/          - GUI applications"
 echo "  /test/         - test programs"
 echo ""

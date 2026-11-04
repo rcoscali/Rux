@@ -176,6 +176,31 @@ show_usage() {
 # Main function
 main() {
     local COMMAND="${1:-build}"
+    local PLATFORM
+    PLATFORM="$(bash "$PROJECT_ROOT/build/current-platform.sh")"
+    if [ "$PLATFORM" = "x86_64" ]; then
+        INSTALL_DIR="${SCRIPT_DIR}/x86_64-rux-linux-musl"
+        MUSL_DIR="${SCRIPT_DIR}/musl-${MUSL_VERSION}-x86_64"
+        case "$COMMAND" in
+            clean) clean_musl; return ;;
+            build|"") ;;
+            *) error "Unknown command: $COMMAND";;
+        esac
+        if [ -f "$INSTALL_DIR/lib/libc.a" ] && [ -f "$INSTALL_DIR/include/stdio.h" ]; then
+            info "Using existing x86_64 musl SDK: $INSTALL_DIR"
+            return
+        fi
+        mkdir -p "$MUSL_DIR"
+        tar xzf "${SCRIPT_DIR}/musl-${MUSL_VERSION}.tar.gz" -C "$MUSL_DIR" --strip-components=1
+        cd "$MUSL_DIR"
+        ./configure --target=x86_64-linux-musl --prefix="$INSTALL_DIR" \
+            --disable-gcc-wrapper CC=x86_64-linux-gnu-gcc CFLAGS="-O2"
+        make -j"$(nproc)"
+        make install
+        return
+    elif [ "$PLATFORM" != "riscv64" ]; then
+        error "Minimal musl SDK is not supported for PLATFORM=$PLATFORM"
+    fi
 
     case "$COMMAND" in
         clean)

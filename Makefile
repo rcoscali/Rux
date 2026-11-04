@@ -4,6 +4,9 @@
 .PHONY: all build clean run test debug help smp user rootfs gui verify miri kani
 .PHONY: toybox mrsh sdk ltp ubuntu-image ubuntu-run
 
+PLATFORM := $(shell bash build/current-platform.sh)
+export PLATFORM
+
 # ---- Ubuntu native desktop (udesk) ----
 # Image and kernel artifacts
 UBUNTU_IMG ?= work/ubuntu-gui.img
@@ -79,7 +82,11 @@ user: sdk probes
 	@./userspace/build release
 
 # Create rootfs image (containing mrsh and toybox)
+ifeq ($(PLATFORM),x86_64)
+rootfs: toybox mrsh
+else
 rootfs: user toybox mrsh
+endif
 	@echo "Building rootfs image with mrsh and toybox..."
 	@./test/mkrootfs.sh
 

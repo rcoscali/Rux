@@ -111,6 +111,28 @@ ensure_kernel() {
 # Run kernel (console mode, with rootfs)
 run_kernel() {
     local INIT="${1:-$DEFAULT_INIT}"
+    if [ "$PLATFORM" = "x86_64" ]; then
+        local IMAGE="${ROOTFS_IMG:-test/rootfs-x86_64.img}"
+        if [ ! -f "$IMAGE" ]; then
+            echo "Missing x86_64 rootfs: $IMAGE (run make PLATFORM=x86_64 rootfs)" >&2
+            return 1
+        fi
+        if [ ! -f target/x86_64-unknown-none/debug/bzImage ] || \
+           [ "$KERNEL_ELF" -nt target/x86_64-unknown-none/debug/bzImage ]; then
+            python3 build/mkbzimage.py "$KERNEL_ELF" target/x86_64-unknown-none/debug/bzImage
+        fi
+        echo "Starting QEMU (x86_64 q35, console mode, init=$INIT)..."
+        qemu-system-x86_64 \
+            -M q35 -accel "${ACCEL:-tcg,thread=single}" -cpu max \
+            -m 2G -smp 2 \
+            -nographic -serial mon:stdio \
+            -snapshot \
+            -drive "file=$IMAGE,if=none,id=rootfs,format=raw,file.locking=off" \
+            -device virtio-blk-pci,disable-legacy=on,drive=rootfs \
+            -kernel target/x86_64-unknown-none/debug/bzImage \
+            -append "root=/dev/vda rw init=$INIT console=ttyS0"
+        return
+    fi
     echo "Starting QEMU (4 cores, 2GB memory, console mode, init=$INIT)..."
 
     # Detect WSL for informational purposes
@@ -250,12 +272,11 @@ main() {
         ensure_kernel "riscv64" false
         run_kernel_gui "$INIT"
     else
-        # Console mode (riscv64-only — see the gui note)
-        if [ "$PLATFORM" != "riscv64" ]; then
-            echo "run.sh: console mode is riscv64-only for now (PLATFORM=$PLATFORM)" >&2
+        if [ "$PLATFORM" = "aarch64" ]; then
+            echo "run.sh: console mode is not supported for PLATFORM=$PLATFORM" >&2
             exit 1
         fi
-        ensure_kernel "riscv64" false
+        ensure_kernel "$PLATFORM" false
         run_kernel "$INIT"
     fi
 }

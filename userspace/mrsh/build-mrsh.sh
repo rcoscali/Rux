@@ -2,7 +2,7 @@
 # Rux OS - mrsh Build Script
 #
 # Cross-compile mrsh (minimal POSIX shell) using musl libc,
-# generating statically linked RISC-V 64-bit binary.
+# generating a statically linked binary for the selected platform.
 # Links against troglobit/editline for line editing, history, and tab completion.
 
 set -e
@@ -11,7 +11,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 MRSH_DIR="${SCRIPT_DIR}/mrsh"
 MRSH_TARBALL="mrsh-master-4c81598.tar.gz"
-MUSL_DIR="${PROJECT_ROOT}/toolchain/riscv64-rux-linux-musl"
+source "$SCRIPT_DIR/../build-env.sh"
+if [ "$PLATFORM" = "x86_64" ]; then
+    MRSH_DIR="${SCRIPT_DIR}/mrsh-x86_64"
+fi
 
 echo "========================================"
 echo "Rux OS - mrsh Build Script (musl libc)"
@@ -22,9 +25,8 @@ echo "MUSL_DIR: ${MUSL_DIR}"
 echo ""
 
 # Check cross-compiler toolchain
-if ! command -v riscv64-linux-gnu-gcc &> /dev/null; then
-    echo "Error: riscv64-linux-gnu-gcc not found"
-    echo "Please install RISC-V cross-compiler toolchain"
+if ! command -v "$CC" &> /dev/null; then
+    echo "Error: $CC not found"
     exit 1
 fi
 
@@ -34,8 +36,8 @@ if [ ! -d "$MUSL_DIR/include" ]; then
     exit 1
 fi
 
-echo "Cross-compiler: $(which riscv64-linux-gnu-gcc)"
-echo "GCC version: $(riscv64-linux-gnu-gcc --version | head -1)"
+echo "Cross-compiler: $(command -v "$CC")"
+echo "GCC version: $("$CC" --version | head -1)"
 echo ""
 
 # ==================== Build troglobit/editline ====================
@@ -54,6 +56,9 @@ EDITLINE_VER="1.17.1"
 EDITLINE_TARBALL="editline-${EDITLINE_VER}.tar.xz"
 EDITLINE_URL="https://ftp.troglobit.com/editline/${EDITLINE_TARBALL}"
 EDITLINE_BUILD="${SCRIPT_DIR}/editline-build"
+if [ "$PLATFORM" = "x86_64" ]; then
+    EDITLINE_BUILD="${SCRIPT_DIR}/editline-build-x86_64"
+fi
 
 if [ ! -f "${SCRIPT_DIR}/${EDITLINE_TARBALL}" ]; then
     echo "Downloading troglobit/editline ${EDITLINE_VER}..."
@@ -67,12 +72,12 @@ tar -xf "${SCRIPT_DIR}/${EDITLINE_TARBALL}" -C "$EDITLINE_BUILD" --strip-compone
 
 cd "$EDITLINE_BUILD"
 ./configure \
-    --host=riscv64-linux-gnu \
+    --host="$HOST" \
     --prefix="$EDITLINE_BUILD/install" \
     --disable-termcap \
     --enable-static \
     --disable-shared \
-    CFLAGS="-static -march=rv64gc_zicsr -nostdinc -fno-stack-protector -isystem ${MUSL_DIR}/include -isystem /usr/riscv64-linux-gnu/include -isystem /usr/include" \
+    CFLAGS="$MUSL_CFLAGS" \
     LDFLAGS="-static -nostdlib ${MUSL_DIR}/lib/crt1.o ${MUSL_DIR}/lib/crti.o -L${MUSL_DIR}/lib -lc -lgcc ${MUSL_DIR}/lib/crtn.o"
 
 # Patch config.h: force HAVE_TCGETATTR since musl has tcgetattr() but
@@ -109,8 +114,8 @@ if [ ! -d "$MRSH_DIR" ]; then
         exit 1
     fi
 
-    mkdir -p mrsh
-    tar -xzf "$MRSH_TARBALL" -C mrsh
+    mkdir -p "$MRSH_DIR"
+    tar -xzf "$MRSH_TARBALL" -C "$MRSH_DIR"
     echo "mrsh source extracted"
 else
     echo "mrsh source already exists at $MRSH_DIR"
@@ -122,8 +127,11 @@ fi
 # (no Zcb) — /bin/sh died inside `i=$((i+1))` loops (BUG-S005, misfiled as
 # coredump corruption). Build the same routines from gcc soft-fp sources
 # with our march pin and link them ahead of -lgcc. See ../soft-fp/README.md.
-"${SCRIPT_DIR}/../build-softfp.sh"
-SOFTFP_DIR="$(cd "${SCRIPT_DIR}/../soft-fp" && pwd)"
+SOFTFP_LIBS=""
+if [ "$PLATFORM" = "riscv64" ]; then
+    "${SCRIPT_DIR}/../build-softfp.sh"
+    SOFTFP_LIBS="-L${SCRIPT_DIR}/../soft-fp -lsoftfp-pin"
+fi
 
 # ==================== Build mrsh ====================
 
@@ -131,9 +139,8 @@ cd "$MRSH_DIR"
 
 # Set cross-compile environment variables - using musl libc
 # Note: -fno-stack-protector is needed because musl doesn't provide __stack_chk_guard
-export CC=riscv64-linux-gnu-gcc
-export CFLAGS="-static -march=rv64gc_zicsr -nostdinc -fno-stack-protector -isystem ${MUSL_DIR}/include -isystem /usr/riscv64-linux-gnu/include -isystem /usr/include -DHAVE_EDITLINE -I${SCRIPT_DIR}/include -I${EDITLINE_INSTALL}/include"
-export PKG_CONFIG=""
+export CFLAGS="$MUSL_CFLAGS -DHAVE_EDITLINE -I${SCRIPT_DIR}/include -I${EDITLINE_INSTALL}/include"
+export PKG_CONFIG=false
 
 echo ""
 echo "Configuring mrsh (with editline, static)..."
@@ -149,10 +156,10 @@ CONFIG_MK=".build/config.mk"
 # The mrsh Makefile link line is: $(CC) -o $@ $(LDFLAGS) $(objects) -L$(OUTDIR) -lmrsh $(LIBS)
 # We want: $(CC) -static crt1.o crti.o [objects] -lmrsh -lc -lgcc crtn.o -leditline
 # Replace complete LDFLAGS and LIBS blocks, including continuation lines.
-awk -v musl="$MUSL_DIR" -v editline="$EDITLINE_INSTALL" -v softfp="$SOFTFP_DIR" '
+awk -v musl="$MUSL_DIR" -v editline="$EDITLINE_INSTALL" -v softfp="$SOFTFP_LIBS" '
     skip { skip = /\\$/; next }
     /^LDFLAGS=/ { skip = /\\$/; print "LDFLAGS=-static -nostdlib " musl "/lib/crt1.o " musl "/lib/crti.o"; next }
-    /^LIBS=/ { skip = /\\$/; print "LIBS=-L" editline "/lib -leditline -L" musl "/lib -lc -L" softfp " -lsoftfp-pin -lgcc " musl "/lib/crtn.o"; next }
+    /^LIBS=/ { skip = /\\$/; print "LIBS=-L" editline "/lib -leditline -L" musl "/lib -lc " softfp " -lgcc " musl "/lib/crtn.o"; next }
     { print }
 ' "$CONFIG_MK" > "$CONFIG_MK.tmp" && mv "$CONFIG_MK.tmp" "$CONFIG_MK"
 
@@ -182,7 +189,7 @@ if [ -f "$MRSH_DIR/mrsh" ]; then
     # zicboz) and zawrs. Stock-legal extras (zbb/zba/zbs/zicsr/zca/zcd/
     # zaamo/zalrsc/zmmul) stay out of the pattern on purpose.
     BAD_ATTRS='zcb1p0|zcmop1p0|zimop1p0|zicond1p0|zfa1p0|zawrs1p0|zicbo[mp]1p0|zicboz1p0|_v1p0|zve(32|64)[fdx]?1p0|zvbb1p0|zvkb1p0|zvl[0-9]+b1p0'
-    if riscv64-linux-gnu-readelf -A "$MRSH_DIR/mrsh" | grep -qE "$BAD_ATTRS"; then
+    if [ "$PLATFORM" = "riscv64" ] && riscv64-linux-gnu-readelf -A "$MRSH_DIR/mrsh" | grep -qE "$BAD_ATTRS"; then
         echo "Error: mrsh carries ISA attributes beyond the pinned march (SIGILL risk on the stock QEMU cpu):" >&2
         riscv64-linux-gnu-readelf -A "$MRSH_DIR/mrsh" | grep -oE "$BAD_ATTRS" | sort -u >&2
         exit 1
