@@ -148,11 +148,12 @@ CONFIG_MK=".build/config.mk"
 # Replace LDFLAGS line: remove -nostdlib, keep -static and CRT objects
 # The mrsh Makefile link line is: $(CC) -o $@ $(LDFLAGS) $(objects) -L$(OUTDIR) -lmrsh $(LIBS)
 # We want: $(CC) -static crt1.o crti.o [objects] -lmrsh -lc -lgcc crtn.o -leditline
-# Note: LDFLAGS has continuation lines (\), use awk to replace the whole block
+# Replace complete LDFLAGS and LIBS blocks, including continuation lines.
 awk -v musl="$MUSL_DIR" -v editline="$EDITLINE_INSTALL" -v softfp="$SOFTFP_DIR" '
-    /^LDFLAGS=/ { skip=1; print "LDFLAGS=-static -nostdlib " musl "/lib/crt1.o " musl "/lib/crti.o"; next }
-    /^LIBS=/ { skip=0; print "LIBS=-L" editline "/lib -leditline -L" musl "/lib -lc -L" softfp " -lsoftfp-pin -lgcc " musl "/lib/crtn.o"; next }
-    !skip { print }
+    skip { skip = /\\$/; next }
+    /^LDFLAGS=/ { skip = /\\$/; print "LDFLAGS=-static -nostdlib " musl "/lib/crt1.o " musl "/lib/crti.o"; next }
+    /^LIBS=/ { skip = /\\$/; print "LIBS=-L" editline "/lib -leditline -L" musl "/lib -lc -L" softfp " -lsoftfp-pin -lgcc " musl "/lib/crtn.o"; next }
+    { print }
 ' "$CONFIG_MK" > "$CONFIG_MK.tmp" && mv "$CONFIG_MK.tmp" "$CONFIG_MK"
 
 # Switch frontend from basic.c to readline.c (configure didn't detect editline via pkg-config)
