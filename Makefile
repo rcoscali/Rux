@@ -9,11 +9,19 @@ export PLATFORM
 
 # ---- Ubuntu native desktop (udesk) ----
 # Image and kernel artifacts
+ifeq ($(PLATFORM),x86_64)
+UBUNTU_IMG ?= work/ubuntu-x86.img
+KERNEL_BIN ?= target/x86_64-unknown-none/debug/bzImage
+UBUNTU_QEMU ?= /usr/bin/qemu-system-x86_64
+UBUNTU_IMAGE_BUILDER := test/ubuntu-x86/build-img.sh
+else
 UBUNTU_IMG ?= work/ubuntu-gui.img
 KERNEL_BIN ?= target/riscv64gc-unknown-none-elf/debug/rux
 # The distro QEMU build has the SDL display backend; the custom 10.2.2 in
 # /usr/local/bin is compiled without display backends (none/dbus only).
 UBUNTU_QEMU ?= /usr/bin/qemu-system-riscv64
+UBUNTU_IMAGE_BUILDER := test/ubuntu-gui/build-img.sh
+endif
 # CPU count (GUI verified 23/23 on -smp 4; override with SMP=1 make ubuntu-run)
 SMP ?= 4
 # TCG threading: multi = MTTCG (2.1x faster, verified 23/23 on both QEMU
@@ -99,8 +107,10 @@ run:
 # Build (or rebuild) the Ubuntu GUI disk image: work/ubuntu-gui.img.
 # Requires riscv64-linux-gnu-gcc and the shared Ubuntu rootfs (see
 # test/ubuntu-gui/build-img.sh, override with SRC=/path CC=...).
+ifneq ($(PLATFORM),aarch64)
 ubuntu-image:
-	@bash test/ubuntu-gui/build-img.sh
+	@bash $(UBUNTU_IMAGE_BUILDER)
+endif
 
 # Run the Ubuntu desktop in a native SDL window (via WSLg). Keyboard
 # works BOTH in the SDL window itself (virtio-keyboard -> /dev/input/
@@ -108,8 +118,16 @@ ubuntu-image:
 # Ctrl-S SysInfo, Ctrl-A About, Tab cycle focus, Ctrl-W close window.
 # NOTE: plain `-serial stdio` — NOT mon:stdio: the chardev mux would
 # swallow Ctrl-A as its monitor-escape key, but Ctrl-A opens About.
+ifeq ($(PLATFORM),aarch64)
+ubuntu-run ubuntu-image:
+	@echo "Ubuntu desktop is not supported for PLATFORM=$(PLATFORM)" >&2; exit 1
+else
 ubuntu-run: build $(UBUNTU_IMG)
 	@echo "Starting Ubuntu desktop (SDL window + keyboard in window or this terminal)..."
+ifeq ($(PLATFORM),x86_64)
+	ROOTFS="$(UBUNTU_IMG)" QEMU="$(UBUNTU_QEMU)" BZIMAGE="$(KERNEL_BIN)" SMP="$(SMP)" \
+	  NOBUILD=1 bash test/run-x86-ub.sh gui
+else
 	$(UBUNTU_QEMU) -M virt -accel tcg,thread=$(THREAD) -cpu rv64 -m 2G -smp $(SMP) \
 	  -snapshot -display sdl -serial stdio -monitor none \
 	  -device virtio-keyboard-pci -device virtio-tablet-pci \
@@ -118,10 +136,12 @@ ubuntu-run: build $(UBUNTU_IMG)
 	  -device virtio-gpu-pci \
 	  -kernel $(KERNEL_BIN) \
 	  -append "root=/dev/vda rw init=/sbin/init console=ttyS0"
+endif
 
 # Image rule: built on demand by ubuntu-run, refreshed by `make ubuntu-image`.
 $(UBUNTU_IMG):
-	@bash test/ubuntu-gui/build-img.sh
+	@bash $(UBUNTU_IMAGE_BUILDER)
+endif
 
 # Run kernel test script (PLATFORM=riscv64 default; PLATFORM=aarch64 /
 # x86_64 run the suite under that arch's QEMU; see test/run.sh)

@@ -31,7 +31,7 @@ SMP="${SMP:-1}"
 MEM="${MEM:-2G}"
 QEMU="${QEMU:-qemu-system-x86_64}"
 KERNEL_ELF="target/x86_64-unknown-none/debug/rux"
-BZIMAGE="target/x86_64-unknown-none/debug/bzImage"
+BZIMAGE="${BZIMAGE:-target/x86_64-unknown-none/debug/bzImage}"
 
 if [ ! -f "$ROOTFS" ]; then
     echo "rootfs image missing: $ROOTFS" >&2

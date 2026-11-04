@@ -10,6 +10,34 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class PlatformRunTests(unittest.TestCase):
+    def test_ubuntu_run_uses_platform_runner_and_image(self):
+        for platform, image, runner in [
+            ("x86_64", "work/ubuntu-x86.img", "test/run-x86-ub.sh gui"),
+            ("riscv64", "work/ubuntu-gui.img", "-cpu rv64"),
+        ]:
+            with self.subTest(platform=platform):
+                result = subprocess.run(
+                    ["make", "-n", "-o", "build", "-o", image,
+                     f"PLATFORM={platform}", "ubuntu-run"],
+                    cwd=ROOT, text=True, capture_output=True, check=True,
+                )
+                self.assertIn(image, result.stdout)
+                self.assertIn(runner, result.stdout)
+                if platform == "x86_64":
+                    self.assertNotIn("qemu-system-riscv64", result.stdout)
+                    self.assertIn("NOBUILD=1", result.stdout)
+
+    def test_ubuntu_image_uses_platform_builder(self):
+        for platform, builder in [
+            ("x86_64", "test/ubuntu-x86/build-img.sh"),
+            ("riscv64", "test/ubuntu-gui/build-img.sh"),
+        ]:
+            result = subprocess.run(
+                ["make", "-n", f"PLATFORM={platform}", "ubuntu-image"],
+                cwd=ROOT, text=True, capture_output=True, check=True,
+            )
+            self.assertIn(builder, result.stdout)
+
     def test_x86_console_selects_matching_image(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
