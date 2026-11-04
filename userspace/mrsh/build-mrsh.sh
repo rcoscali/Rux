@@ -137,7 +137,7 @@ export PKG_CONFIG=""
 
 echo ""
 echo "Configuring mrsh (with editline, static)..."
-./configure --with-readline --static
+./configure --without-readline --static
 
 # Patch config.mk to fix LDFLAGS and LIBS for musl static linking
 # mrsh's configure adds its own LDFLAGS (soname, version-script, etc.) and clears LIBS
